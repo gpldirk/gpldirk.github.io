@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  
+  
+  
+  <entry>
+    <title>利用 GitHub Actions 自动部署 Hexo 博客</title>
+    <link href="/posts/actions-deploy/"/>
+    <url>/posts/actions-deploy/</url>
+    
+    <content type="html"><![CDATA[<h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文主要讲如何将 GitHub Actions 应用于 Hexo 部署中，如果还不太熟悉 GitHub Actions 可以看<a href="https://zkqiang.cn/posts/e8ed6836/">这篇文章</a>，简单地说 Actions 就是在设定的时机触发创建一个虚拟云环境，然后执行一连串动作，从而实现自动部署的功能。</p><h2 id="创建工作流"><a href="#创建工作流" class="headerlink" title="创建工作流"></a>创建工作流</h2><p>首先要保证你的 Hexo 博客项目是全部提交到 GitHub 仓库中，然后在博客目录下创建 <code>.github/workflows/xxx.yml</code> 文件，文件名任意。</p><p>文件内容如下，根据自己的需求增删 step：</p><pre><code class="lang-yaml">name: Deploy                      # Actions 显示的名字，随意设置on: [push]                        # 监听到 push 事件后触发jobs:  build:    runs-on: ubuntu-latest    steps:    - name: Checkout              # 拉取当前执行 Actions 仓库的指定分支      uses: actions/checkout@v2      with:        ref: master    - name: Update Submodule      # 如果仓库有 submodule，在这里更新，没有则删掉此步骤      run: |        git submodule init        git submodule update --remote    - name: Setup Node            # 安装 Node 环境      uses: actions/setup-node@v1      with:        node-version: &quot;10.x&quot;    - name: Hexo Generate         # 安装 Hexo 依赖并且生成静态文件      run: |        rm -f .yarnclean        yarn --frozen-lockfile --ignore-engines --ignore-optional --non-interactive --silent --ignore-scripts --production=false        rm -rf ./public        yarn run hexo clean        yarn run hexo generate    - name: Hexo Deploy           # 部署步骤，这里以 hexo deploy 为例      env:        SSH_PRIVATE: $&#123;&#123; secrets.SSH_PRIVATE &#125;&#125;        GIT_NAME: yourname        GIT_EMAIL: your@email.com      run: |        mkdir -p ~/.ssh/        echo &quot;$SSH_PRIVATE&quot; | tr -d &#39;\r&#39; &gt; ~/.ssh/id_rsa        chmod 600 ~/.ssh/id_rsa        ssh-keyscan github.com &gt;&gt; ~/.ssh/known_hosts        git config --global user.name &quot;$GIT_NAME&quot;        git config --global user.email &quot;$GIT_EMAIL&quot;        yarn run hexo deploy</code></pre><p>只要配置了 hexo deploy 的都可以通过上面这种方式部署，注意如果是在其他 Pages 部署（比如Coding Pages 或者 码云 Pages），<code>ssh-keyscan</code> 需要进行增改：</p><pre><code class="lang-yaml"># github、gitee 和 coding 三种 Pages 的示例，根据需求替换上例中语句，需要注意的是 coding 是使用二级域名。ssh-keyscan github.com &gt;&gt; ~/.ssh/known_hostsssh-keyscan gitee.com &gt;&gt; ~/.ssh/known_hostsssh-keyscan e.coding.net &gt;&gt; ~/.ssh/known_hosts</code></pre><p>然后 <code>${{ secrets.SSH_PRIVATE }}</code> 这种调用方式，需要提前在下图中设置常量：</p><p><img src="https://rmt.dogedoge.com/fetch/fluid/storage/actions-deploy/1.png?w=1280&amp;fmt=webp" alt=""></p><p>这样做可以避免敏感数据放在 yml 文件中被泄漏，即使你是私有仓库也建议这样做，因为设置的常量是无法被二次查看的，就算你账号被盗也不用担心。</p><h2 id="常用步骤配置"><a href="#常用步骤配置" class="headerlink" title="常用步骤配置"></a>常用步骤配置</h2><p>以上是以部署 hexo deploy 为例，下面再提供几种其他常见的部署配置，注意修改你自己的变量参数。</p><h3 id="阿里云-OSS"><a href="#阿里云-OSS" class="headerlink" title="阿里云 OSS"></a>阿里云 OSS</h3><pre><code class="lang-yaml">- name: Deploy to OSS  env:    OSS_AccessKeyID: $&#123;&#123; secrets.ACCESS_KEY_ID &#125;&#125;    OSS_AccessKeySecret: $&#123;&#123; secrets.ACCESS_KEY_SECRET &#125;&#125;    OSS_EndPoint: oss-ap-southeast-1.aliyuncs.com    OSS_Bucket: fluid-dev  run: |    wget -q http://gosspublic.alicdn.com/ossutil/1.6.10/ossutil64    chmod +x ./ossutil64    ./ossutil64 config -e $OSS_EndPoint -i $OSS_AccessKeyID -k $OSS_AccessKeySecret -L CH    ./ossutil64 rm -r -f oss://$OSS_Bucket/    ./ossutil64 cp -r -f ./public oss://$OSS_Bucket/</code></pre><h3 id="腾讯云-COS"><a href="#腾讯云-COS" class="headerlink" title="腾讯云 COS"></a>腾讯云 COS</h3><pre><code class="lang-yaml">- name: Deploy to COS  uses: zkqiang/tencent-cos-action@v0.1.0  with:    args: delete -r -f / &amp;&amp; upload -r ./public/ /    secret_id: $&#123;&#123; secrets.SECRET_ID &#125;&#125;    secret_key: $&#123;&#123; secrets.SECRET_KEY &#125;&#125;    bucket: $&#123;&#123; secrets.BUCKET &#125;&#125;    region: ap-shanghai</code></pre><h3 id="腾讯云开发"><a href="#腾讯云开发" class="headerlink" title="腾讯云开发"></a>腾讯云开发</h3><pre><code class="lang-yaml">- name: Deploy to Tencent CloudBase  uses: TencentCloudBase/cloudbase-action@v1.1.1  with:    secretId: $&#123;&#123; secrets.SECRET_ID &#125;&#125;    secretKey: $&#123;&#123; secrets.SECRET_KEY &#125;&#125;    envId: $&#123;&#123; secrets.ENV_ID &#125;&#125;    staticSrcPath: ./public</code></pre><h3 id="服务器"><a href="#服务器" class="headerlink" title="服务器"></a>服务器</h3><p>如果是直接部署在服务器上，需要通过 FTP/SFTP 协议来完成上传操作，因此确保你的服务器开启了 FTP 服务。如果使用 FTP-Deploy-Action 的话，需要注意的是因为 <code>./public</code> 是在流程中生成的文件，需要添加  <code>.git-ftp-include</code> 文件后方可推送，具体请查看相关 <a href="https://github.com/SamKirkland/FTP-Deploy-Action#build-and-publish-reactangularvue-website/">README</a> 中的相关内容。</p><pre><code class="lang-yaml">- name: Deploy to Server  uses: SamKirkland/FTP-Deploy-Action@3.1.1  with:    ftp-server: $&#123;&#123; secrets.FTP_SERVER &#125;&#125;      # eg: ftp://ftp.xxx.com:22/mypath    ftp-username: $&#123;&#123; secrets.FTP_USERNAME &#125;&#125;    ftp-password: $&#123;&#123; secrets.FTP_PASSWORD &#125;&#125;    local-dir: ./public</code></pre>]]></content>
+    
+    
+    <categories>
+      
+      <category>实用技巧</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>部署</tag>
+      
+      <tag>示例</tag>
+      
+      <tag>Hexo</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  
+</search>
